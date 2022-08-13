@@ -1,0 +1,488 @@
+---
+title: 'ENGSCI 255 Assignment 3'
+author: "Mihnea Vlad (ID: 736248940)"
+output:
+  pdf_document: default
+  word_document: default
+---
+```{r setup, include=TRUE}
+library(tidyverse)
+library(lubridate)
+source("ggpairs.R")
+library(rpart)
+library(rattle)
+library(randomForest)
+library(klaR)
+
+# import required data
+prices <- read_csv("prices.csv", col_names = TRUE)
+banknotes <- read_csv("banknotes.csv", col_names = TRUE)
+banknotesDis <- read_csv("banknotes-discrete.csv", col_names = TRUE)
+```
+
+## Question 1a)
+```{r}
+prices$TradingDate = dmy(prices$TradingDate)
+head(prices)
+```
+
+## Question 1b)
+```{r}
+prices_longer <- prices %>% 
+                 pivot_longer(c(Benmore, Haywards, Otahuhu), 
+                              names_to = "Nodes", values_to = "Prices")
+head(prices_longer)
+```
+
+## Question 1c)
+```{r}
+prices_longer <- prices_longer %>% 
+                 mutate(Year = year(prices_longer$TradingDate), 
+                        Month = month(prices_longer$TradingDate, label = TRUE), 
+                        Quarter = quarter(prices_longer$TradingDate, 
+                                          fiscal_start = 1))
+
+prices_longer$Quarter <- paste("Q", prices_longer$Quarter, sep = '')
+
+head(prices_longer)
+```
+
+## Question 1d)
+```{r, message=FALSE}
+prices_Benmore <- prices_longer %>% 
+                  filter(Nodes == 'Benmore') %>%
+                  group_by(Month, Year) %>% 
+                  summarise(MeanPrice = mean(Prices)) %>%
+                  pivot_wider(names_from = Year, values_from = MeanPrice)
+
+prices_Benmore
+```
+The average price in months 1-4 is significantly lower in 2020 than in 2019. This may be due to the impacts COVID-19 and the nationwide lock-down, reducing overall demand for electricity in Benmore as companies were closed, pushing the price down. 
+
+## Question 1e)
+```{r, message=FALSE}
+
+prices_longer <- prices_longer %>%
+                 mutate(Day = day(prices_longer$TradingDate))
+prices_longer$Year <- as.factor(prices_longer$Year) 
+
+OtahuhuPlot <- prices_longer %>%
+               filter(Nodes == 'Otahuhu') %>%
+               group_by(Day, Month, Year) %>%
+               summarise(DailyPrice = mean(Prices)) %>%
+               ggplot(aes(x=Month,y=DailyPrice)) +
+               geom_violin(aes(fill=Year)) +
+               labs(title=" Mean Daily Price by Month", 
+                    x="Month", y="Mean Daily Price ($/MWh)", 
+                    caption = "Mihnea Vlad ID: 736248940" )
+
+OtahuhuPlot
+
+
+```
+In the months of Jan-May, the 2019 distributions are shifted higher than the 2020 distributions. There tends to be an gradual upward shift in the distributions of daily prices each month starting from month 5 and peaking in month 8. After month 8, the distribution start moving downwards again. This upward shift may be caused by people/companies in Otahuhu demanding more electricity for heating over the winter months, pushing the price up.
+
+
+
+
+## Question 1f)
+```{r, message=FALSE}
+
+
+TradingPlot <- prices_longer %>%
+               filter(TradingPeriod < 49) %>%
+               group_by(TradingPeriod, Quarter, Year, Nodes) %>%
+               summarise(TradingPrice = mean(Prices)) %>%
+               ggplot() + 
+               geom_line(aes(x=TradingPeriod, y=TradingPrice, color=Nodes)) +
+               labs(title='Mean Trading Price by Trading Period',
+                    x='Trading Period', y='Trading Price ($/MWh)', 
+                    caption = "Mihnea Vlad ID: 736248940") +
+               facet_grid(Year~Quarter)
+
+TradingPlot
+
+
+
+```
+All 3 nodes follow essentially the same pattern over the 48 trading periods. Benmore experiences unusually low prices in quarter 1 of 2020. The order of the nodes also seems to stay relatively consistent throughout the day with Benmore always having the lowest average trading price in a quarter and Otahuhu having the highest. The most notable feature across all of the plots is the dip in trading price from trading period 0 until approximately trading period 10 before the trading price begins to rise. This is explained by the time of day these trading periods correspond to (Trading periods 1-10 correspond to 12am - 5am). Most people will be sleeping at this time of the day so there will be little activity within the towns, reducing for demand for electricity, pushing the price down. As people begin to wake up after trading period 10, activity resumes and demand for electricity increases, pushing the price up again.
+
+## Question 1g)
+```{r, message=FALSE}
+
+prices_longer <- prices_longer %>% 
+                 mutate(Day = ifelse((wday(TradingDate, label = TRUE) == 'Sat' | 
+                                      wday(TradingDate, label = TRUE) == 'Sun'), 
+                                      'Weekend', 'Weekday'),
+                        DayLabel = wday(TradingDate, label = TRUE)) 
+
+
+prices_longer %>% slice(1:6)
+prices_longer %>% slice(577:582)
+
+```
+## Question 1h)
+```{r, message=FALSE}
+
+prices_longer$Year <- as.factor(prices_longer$Year)
+
+
+DayPlot <- prices_longer %>%
+           filter(Nodes == 'Haywards') %>%
+           group_by(Day, Year) %>%
+           ggplot(aes(x=Prices, color=Day)) +
+           geom_density() +
+           labs(title='Trading Price Density Plot', 
+                x='Trading Price ($/MWh)', y='Density',
+                caption = "Mihnea Vlad ID: 736248940") +
+           facet_wrap(~Year, ncol = 2)
+
+DayPlot
+
+
+```
+The density plots are essentially the same on both weekends and weekdays. The density in both years dips when the prices are close to 0 before going back up again. This dip is more pronounced in 2019 than in 2020. Resultingly, the main density peak is slightly higher in 2019 than in 2020. 
+
+
+```{r}
+head(banknotes)
+```
+
+## Question 2a)
+```{r}
+
+NotePairs <- banknotes %>%
+             ggpairs(where(is.double), color=class, )
+
+NotePairs
+
+```
+Both counterfeit and genuine notes follow similar distribution pattern, the main difference being a shift in these distributions depending on the class. This shift is most visible with *var* plotted along the horizontal axis. The genuine class has a visible right shift in the data points, regardless of the other attribute. This right shift is slightly visible when *skew* is plotted along the horizontal axis but not to the same extent. No visible pattern is observed between *kurtosis* and *entropy* as there is a large overlap between classes when observing these attributes.
+
+## Question 2b)
+```{r}
+training = banknotes[c(1:350,1093:1372),]
+test = banknotes[c(351:1092),]
+
+view(training)
+view(test)
+```
+ 
+## Question 2c i)
+```{r}
+tree1 <- rpart(class~.,data=training,method="class",
+               control=rpart.control(minsplit=1, maxdepth=2, cp=0))
+```
+
+```{r}
+tree2 <- rpart(class~.,data=training,method="class",
+               control=rpart.control(minsplit=1, maxdepth=5, cp=0))
+```
+
+```{r}
+tree3 <- rpart(class~.,data=training,method="class",
+               control=rpart.control(minsplit=1, maxdepth=8, cp=0))
+
+```
+
+## Question 2c ii)
+```{r}
+# In Sample Tree 1
+tree1.InPredict = predict(tree1,training,type="class")
+tree1.InSample = table(Class=training$class, Prediction=tree1.InPredict)
+
+# Out of Sample Tree 1
+tree1.OutPredict = predict(tree1,test,type="class")
+tree1.OutSample = table(Class=test$class, Prediction=tree1.OutPredict)
+
+# In Sample Tree 2
+tree2.InPredict = predict(tree2,training,type="class")
+tree2.InSample = table(Class=training$class, Prediction=tree2.InPredict)
+
+# Out of Sample Tree 2
+tree2.OutPredict = predict(tree2,test,type="class")
+tree2.OutSample = table(Class=test$class, Prediction=tree2.OutPredict)
+
+# In Sample Tree 3
+tree3.InPredict = predict(tree3,training,type="class")
+tree3.InSample = table(Class=training$class, Prediction=tree3.InPredict)
+
+# Out of Sample Tree 3
+tree3.OutPredict = predict(tree3,test,type="class")
+tree3.OutSample = table(Class=test$class, Prediction=tree3.OutPredict)
+```
+
+### Tree 1 In-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree1.InSample
+```
+
+### Tree 1 Out-Of-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree1.OutSample
+```
+
+### Tree 2 In-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree2.InSample
+```
+
+### Tree 2 Out-Of-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree2.OutSample
+```
+
+### Tree 3 In-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree3.InSample
+```
+
+### Tree 3 Out-Of-Sample Confusion Matrix:
+```{r, echo=FALSE}
+tree3.OutSample
+```
+
+## Question 2c iii)
+```{r}
+
+# Tree 1 Accuracy calculations:
+tree1.InSample.Acc <- (tree1.InSample[1] + tree1.InSample[4])/sum(tree1.InSample)
+tree1.OutSample.Acc <- (tree1.OutSample[1] + tree1.OutSample[4])/sum(tree1.OutSample)
+
+# Tree 2 Accuracy calculations:
+tree2.InSample.Acc <- (tree2.InSample[1] + tree2.InSample[4])/sum(tree2.InSample)
+tree2.OutSample.Acc <- (tree2.OutSample[1] + tree2.OutSample[4])/sum(tree2.OutSample)
+
+# Tree 3 Accuracy calculations:
+tree3.InSample.Acc <- (tree3.InSample[1] + tree3.InSample[4])/sum(tree3.InSample)
+tree3.OutSample.Acc <- (tree3.OutSample[1] + tree3.OutSample[4])/sum(tree3.OutSample)
+
+# Creates table columns
+maxDepth = c('2', '5', '8')
+InSample = c(tree1.InSample.Acc, tree2.InSample.Acc, tree3.InSample.Acc)
+OutSample = c(tree1.OutSample.Acc, tree2.OutSample.Acc, tree3.OutSample.Acc)
+
+# Creates table
+AccuracyTable = tibble(TreeMaxDepth=maxDepth, InSampleAccuracy = InSample, 
+                       OutOfSampleAccuracy = OutSample)
+AccuracyTable
+```
+
+## Question 2c iv)
+As MaxDepth increases, the In-Sample accuracy also increases. In-Sample accuracy starts at 0.910 for a MaxDepth of 2 and increases to 0.997 for a MaxDepth of 5 before increasing to a maximum value of 1.00 for a MaxDepth of 8. This occurs because a higher MaxDepth allows a tree to have more branches and sorting conditions which separates In-Sample data points with a higher degree of accuracy. Since the In-Sample data was used to create the tree, the In-Sample accuracy can reach the maximum value of 1 because the tree is specific to that data set. 
+
+As MaxDepth increases, the Out-Of-Sample Accuracy starts at 0.900 for a MaxDepth of 2, increasing to 0.966 for a MaxDepth of 5 before decreasing slightly to 0.964 for a MaxDepth of 8. As MaxDepth becomes too high, the Out-Of-Sample accuracy reaches a plateau as the tree begins to overfit the training data. This occurs when the tree is so specific to the training set data that it is no longer able to make accurate predictions on unseen data sets. A MaxDepth of 5 seems to be optimal for this data set whereas a MaxDepth of 8 overfits the training set data.
+
+## Question 2d i)
+```{r}
+# Visualise Tree with MaxDepth 2
+fancyRpartPlot(tree1, caption = "Mihnea Vlad ID: 736248940")
+```
+## Question 2d ii)
+```{r}
+test <- test %>% 
+        mutate(Tree1_Prediction = tree1.OutPredict) %>%
+        mutate(Prediction_Outcome = ifelse(class==Tree1_Prediction, 
+                                    ifelse(class=='genuine', 'TN', 'TP'),
+                                    ifelse(class=='genuine', 'FP', 'FN')))
+                                     
+
+head(test)
+```
+
+## Question 2d iii)
+```{r}
+PredictionPairs <- test %>%
+                   ggpairs(where(is.double), color=Prediction_Outcome)
+
+PredictionPairs
+```
+The misclassified points are shown the red and green dots. The tree in (d)i only uses the *var*, *skew* and *kurtosis* attributes to classify data points. Consequently, the misclassified points are seen in clusters on the plots which show the correlations between these attributes (Plots in row 1, col 1 and row 2, col 1). These clusters are located close to the values used as thresholds for those particular attributes on the tree in (d)i (i.e. *var* = 0.77, *skew* = 7.5 and *kurtosis* = 4.7). This is probably because these threshold values cannot be chosen to satisfy every single data point, so there will always be some misclassification for data points with values close to the threshold values for each attribute. 
+
+There are no visible groupings of misclassified points in the entropy plots as it wasn't used as a classification attribute on the tree in (d)i.
+
+## Question 2e i)
+```{r}
+# Create tree with MaxDepth 3 and loss matrix to avoid False Positives
+tree4 <- rpart(class~.,data=training,method="class",
+               control=rpart.control(minsplit=1, maxdepth=3, cp=0),
+               parms=list(loss=matrix(c(0,92,8,0), nrow=2)))
+
+```
+
+## Question 2e ii)
+
+### Tree 4 In-Sample Confusion Matrix:
+```{r}
+# In Sample Tree 4
+tree4.InPredict = predict(tree4,training,type="class")
+tree4.InSample = table(Class=training$class, Prediction=tree4.InPredict)
+tree4.InSample
+
+```
+```{r}
+# Calculate in-sample specificity
+specificity = tree4.InSample[4]/(tree4.InSample[2]+tree4.InSample[4])
+cat("In-Sample specificty is", specificity)
+```
+### Tree 4 Out-Of-Sample Confusion Matrix:
+```{r}
+# Out of Sample Tree 4
+tree4.OutPredict = predict(tree4,test,type="class")
+tree4.OutSample = table(Class=test$class, Prediction=tree4.OutPredict)
+
+tree4.OutSample
+```
+## Question 2f)
+
+### 10 Tree forests
+```{r}
+banknotes$class <- as.factor(banknotes$class)
+set.seed(100)
+# 10 Tree forests:
+rf1.10Trees <- randomForest(class~., banknotes, ntree=10)
+rf2.10Trees <- randomForest(class~., banknotes, ntree=10)
+rf3.10Trees <- randomForest(class~., banknotes, ntree=10)
+rf4.10Trees <- randomForest(class~., banknotes, ntree=10)
+rf5.10Trees <- randomForest(class~., banknotes, ntree=10)
+
+rf1.10Trees
+rf2.10Trees
+rf3.10Trees
+rf4.10Trees
+rf5.10Trees
+
+```
+
+### 50 Tree forests
+```{r}
+banknotes$class <- as.factor(banknotes$class)
+set.seed(100)
+# 50 Tree forests:
+rf1.50Trees <- randomForest(class~., banknotes, ntree=50)
+rf2.50Trees <- randomForest(class~., banknotes, ntree=50)
+rf3.50Trees <- randomForest(class~., banknotes, ntree=50)
+rf4.50Trees <- randomForest(class~., banknotes, ntree=50)
+rf5.50Trees <- randomForest(class~., banknotes, ntree=50)
+
+rf1.50Trees
+rf2.50Trees
+rf3.50Trees
+rf4.50Trees
+rf5.50Trees
+```
+### 250 Tree forests
+```{r}
+banknotes$class <- as.factor(banknotes$class)
+set.seed(100)
+# 250 Tree forests:
+rf1.250Trees <- randomForest(class~., banknotes, ntree=250)
+rf2.250Trees <- randomForest(class~., banknotes, ntree=250)
+rf3.250Trees <- randomForest(class~., banknotes, ntree=250)
+rf4.250Trees <- randomForest(class~., banknotes, ntree=250)
+rf5.250Trees <- randomForest(class~., banknotes, ntree=250)
+
+rf1.250Trees
+rf2.250Trees
+rf3.250Trees
+rf4.250Trees
+rf5.250Trees
+```
+```{r}
+# Creates table columns
+nTrees = c(10, 50, 250)
+rf1_OOB = c(1.03, 0.73, 0.58)
+rf2_OOB = c(1.55, 0.66, 0.66)
+rf3_OOB = c(1.11, 0.73, 0.66)
+rf4_OOB = c(0.89, 0.8, 0.66)
+rf5_OOB = c(1.25, 0.51, 0.58)
+
+# Creates table
+OOBTable <- tibble(nTrees, rf1_OOB, rf2_OOB, rf3_OOB, rf4_OOB, rf5_OOB)
+
+OOBSummary <- OOBTable %>%
+              pivot_longer(contains('f'), names_to = 'RF', values_to = 'OOB') %>%
+              group_by(nTrees) %>%
+              summarise(Mean_OOB = mean(OOB))
+
+
+OOBTable <- OOBTable %>%
+            mutate(dplyr::select(OOBSummary,2))
+
+OOBTable
+```
+As the number of trees in a random forest increases, the mean OOB decreases. This makes sense as larger forests will use a larger number of trees to predict an outcome, reducing the likelihood of misclassification which leads to a decrease in mean OOB.
+
+
+## Question 2g)
+```{r}
+ImPlot = varImpPlot(rf1.250Trees)
+
+ImPlot
+```
+
+*var* is, by far, the most useful attribute to detect forgeries because it has the highest mean decrease in Gini score of 372.5 (When a split is made using this attribute, the mean decrease in the Gini score is 372.5). The second most useful attribute is *skew* with a mean decrease in Gini score of 162.8, the third most useful attribute is *kurtosis* with a mean decrease in Gini score of 107.5 and the least useful attribute is *entropy* with a mean decrease in Gini score of 34.3. Based on this plot, a relatively accurate random forest could be generated without including the entropy attribute as it is not very useful in detecting forgeries.
+
+## Question 2h)
+
+```{r}
+# Converts all attributes to factors
+banknotesDis$var <- as.factor(banknotesDis$var)
+banknotesDis$skew <- as.factor(banknotesDis$skew)
+banknotesDis$kurtosis <- as.factor(banknotesDis$kurtosis)
+banknotesDis$entropy <- as.factor(banknotesDis$entropy)
+banknotesDis$class <- as.factor(banknotesDis$class)
+
+# Creates test set and training set
+trainingD = banknotesDis[c(1:350,1093:1372),]
+testD = banknotesDis[c(351:1092),]
+
+# Creates Naive Bayes model 
+banknotesDis.nb = NaiveBayes(class~.,data=trainingD)
+
+```
+
+## Question 2i)
+
+```{r}
+# In-sample predictions
+InSample <- suppressWarnings(predict(banknotesDis.nb, trainingD)$class)
+InSample.conf <- table(class=trainingD$class,prediction=InSample)
+
+InSample.conf
+InSample.Acc <- (InSample.conf[1] + InSample.conf[4])/sum(InSample.conf)
+
+# Out-sample predictions
+OutSample <- suppressWarnings(predict(banknotesDis.nb, testD)$class)
+OutSample.conf <- table(class=testD$class,prediction=OutSample)
+
+OutSample.conf
+OutSample.Acc <- (OutSample.conf[1] + OutSample.conf[4])/sum(OutSample.conf)
+
+noquote("")
+noquote("In Sample Accuracy:")
+InSample.Acc
+noquote("")
+noquote("Out of Sample Accuracy:")
+OutSample.Acc
+
+
+
+
+```
+
+## Question 2j)
+
+```{r}
+noquote('Naive-Bayes:')
+OutSample.conf
+```
+
+```{r}
+noquote('Tree - depth 5:')
+tree2.OutSample
+```
+The Naive Bayes model has an out sample accuracy of 0.92 whereas the classification tree with depth 5 has an out sample accuracy of 0.97 which is slightly higher than the Naive Bayes model.  	
+
+## Question 2k)
+Naive Bayes assumes conditional independence among the predictor variables. This is unlikely to be true in this scenario because relationships between the predictor variables exist as seen on the pairs plot in q2 d iii. This probably accounts for the accuracy differences.
